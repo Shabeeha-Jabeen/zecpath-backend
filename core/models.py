@@ -1,15 +1,26 @@
 from django.db import models
+from django.contrib.auth.models import AbstractUser
 
+class User(AbstractUser):
+    ROLE_CHOICES=[
+        ('ADMIN','Admin'),
+        ('EMPLOYER','Employer'),
+        ('CANDIDATE','Candidate'),
+    ]
+    email=models.EmailField(unique=True)
+    phone=models.CharField(max_length=15,blank=True)
+    role = models.CharField(
+        max_length=20,
+        choices=ROLE_CHOICES
+    )
 
-class User(models.Model):
-    username = models.CharField(max_length=100)
-    email = models.EmailField(unique=True)
-    password = models.CharField(max_length=255)
-    is_active = models.BooleanField(default=True)
-    date_joined = models.DateTimeField(auto_now_add=True)
+    is_verified = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.username
+        return self.email
 
 
 class Employer(models.Model):

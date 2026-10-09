@@ -69,6 +69,10 @@ class Job(models.Model):
 
     description = models.TextField()
     skills = models.TextField(blank=True)
+    education_required = models.CharField(
+    max_length=100,
+    blank=True
+    )
 
     salary_min = models.DecimalField(
     max_digits=10,
@@ -230,3 +234,26 @@ class AdminAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} - {self.created_at}"      
+
+class ATSScore(models.Model):
+    application = models.OneToOneField(
+        Application,
+        on_delete=models.CASCADE,
+        related_name="ats_score"
+    )
+
+    match_percentage = models.FloatField(default=0)
+    skills_score = models.FloatField(default=0)
+    experience_score = models.FloatField(default=0)
+    education_score = models.FloatField(null=True, blank=True)
+
+    matched_skills = models.JSONField(default=list, blank=True)
+    missing_skills = models.JSONField(default=list, blank=True)
+
+    calculated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return (
+            f"Application {self.application.id} "
+            f"- ATS Match {self.match_percentage}%"
+        )    

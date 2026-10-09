@@ -4,11 +4,14 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import AllowAny
-from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog
+from rest_framework.permissions import AllowAny,IsAuthenticated
+from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog,ATSScore
 from .permissions import IsCandidate, IsEmployer,IsPlatformAdmin
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db.models.functions import TruncMonth
+from core.ats_scoring import calculate_ats_score
+from .resume_parser import extract_resume_text,clean_resume_text,extract_resume_skills,extract_experience_years,extract_education
+from pathlib import Path
 from .serializers import (
     ApplicationSerializer,
     CandidateProfileSerializer,
@@ -1166,3 +1169,158 @@ class AdminAuditLogAPI(APIView):
             },
             status=status.HTTP_201_CREATED
         )
+
+class ResumeTextExtractionAPI(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        resume_file = request.FILES.get("resume")
+
+        if not resume_file:
+            return Response(
+                {"detail": "Please upload a resume file."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        extension = Path(resume_file.name).suffix.lower()
+
+        if extension not in [".pdf", ".docx"]:
+            return Response(
+                {"detail": "Only PDF and DOCX files are supported."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if resume_file.size > 5 * 1024 * 1024:
+            return Response(
+                {"detail": "File size must not exceed 5 MB."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            extracted_text = extract_resume_text(resume_file)
+            cleaned_text = clean_resume_text(extracted_text)
+
+        except Exception:
+            return Response(
+                {"detail": "Unable to process this file."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not cleaned_text:
+            return Response(
+                {
+                    "detail": (
+                        "No readable text found. "
+                        "The PDF may require OCR."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+       
+        return Response({
+            "filename": resume_file.name,
+            "file_type": extension,
+            "extracted_text": extracted_text,
+            "cleaned_text": cleaned_text,
+            "character_count": len(cleaned_text),
+            "skills": extract_resume_skills(cleaned_text),
+            "experience_years": extract_experience_years(cleaned_text),
+            "education": extract_education(cleaned_text),
+        }, status=status.HTTP_200_OK)  
+class ATSMatchPercentageAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, job_id):
+        try:
+            job = Job.objects.get(
+                id=job_id,
+                status="OPEN"
+            )
+        except Job.DoesNotExist:
+            return Response(
+                {"error": "Open job not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            candidate = request.user.candidate_profile
+        except Candidate.DoesNotExist:
+            return Response(
+                {"error": "Candidate profile not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        result = calculate_ats_score(candidate, job)
+
+        return Response({
+            "job_id": job.id,
+            "job_title": job.title,
+            "candidate_id": candidate.id,
+            **result
+        }, status=status.HTTP_200_OK)   
+
+class RankedCandidatesAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, job_id):
+        try:
+            job = Job.objects.get(id=job_id, status="OPEN")
+        except Job.DoesNotExist:
+            return Response(
+                {"error": "Open job not found"},
+                status=404
+            )
+
+        applications = (
+            Application.objects
+            .filter(job=job)
+            .select_related("candidate", "candidate__user")
+        )
+
+        ranked_candidates = []
+
+        for application in applications:
+            candidate = application.candidate
+            score_data = calculate_ats_score(candidate, job)
+            ATSScore.objects.update_or_create(
+                application=application,
+                defaults={
+                    "match_percentage": score_data["match_percentage"],
+                    "skills_score": (
+                        score_data["skills_score"]
+                        if score_data["skills_score"] is not None
+                        else 0
+                    ),
+                    "experience_score": score_data["experience_score"],
+                    "education_score": score_data["education_score"],
+                    "matched_skills": score_data["matched_skills"],
+                    "missing_skills": score_data["missing_skills"],
+            }
+        )
+
+            ranked_candidates.append({
+                "application_id": application.id,
+                "candidate_id": candidate.id,
+                "candidate_name": candidate.user.username,
+                "application_status": application.status,
+                **score_data,
+            })
+
+        ranked_candidates.sort(
+            key=lambda item: item["match_percentage"],
+            reverse=True
+        )
+
+        for rank, candidate_data in enumerate(
+            ranked_candidates, start=1
+        ):
+            candidate_data["rank"] = rank
+
+        return Response({
+            "job_id": job.id,
+            "job_title": job.title,
+            "total_candidates": len(ranked_candidates),
+            "ranked_candidates": ranked_candidates,
+        })     

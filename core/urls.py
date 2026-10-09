@@ -35,6 +35,9 @@ from .views import (
     AccountFlagAPI,
     ResolveAccountFlagAPI,
     AdminAuditLogAPI,
+    ResumeTextExtractionAPI,
+    ATSMatchPercentageAPI,
+    RankedCandidatesAPI,
     
 
     
@@ -196,4 +199,19 @@ path(
 ),
 
 path('admin/audit-logs/',AdminAuditLogAPI.as_view(),name='admin-audit-logs'),
+path(
+    "resume/extract/",
+    ResumeTextExtractionAPI.as_view(),
+    name="resume-text-extraction",
+),
+path(
+    "jobs/<int:job_id>/match/",
+    ATSMatchPercentageAPI.as_view(),
+    name="ats-match-percentage"
+),
+path(
+    "jobs/<int:job_id>/ranked-candidates/",
+    RankedCandidatesAPI.as_view(),
+    name="ranked-candidates"
+),
 ]

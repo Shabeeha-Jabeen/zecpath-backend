@@ -38,6 +38,8 @@ from .views import (
     ResumeTextExtractionAPI,
     ATSMatchPercentageAPI,
     RankedCandidatesAPI,
+    AutoShortlistAPI,
+    EmployerOverrideAPI,
     
 
     
@@ -213,5 +215,16 @@ path(
     "jobs/<int:job_id>/ranked-candidates/",
     RankedCandidatesAPI.as_view(),
     name="ranked-candidates"
+),
+path(
+    "applications/<int:application_id>/auto-shortlist/",
+    AutoShortlistAPI.as_view(),
+    name="auto-shortlist",
+),
+
+path(
+    "applications/<int:application_id>/employer-override/",
+    EmployerOverrideAPI.as_view(),
+    name="employer-override",
 ),
 ]

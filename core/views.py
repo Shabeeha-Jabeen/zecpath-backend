@@ -5,11 +5,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAuthenticated
-from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog,ATSScore
+from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog,ATSScore,EmailDeliveryLog
 from .permissions import IsCandidate, IsEmployer,IsPlatformAdmin
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db.models.functions import TruncMonth
-from core.ats_scoring import calculate_ats_score
+from .ats_scoring import auto_shortlist_application,send_application_status_notification
+from core.ats_scoring import calculate_ats_score,send_application_submitted_notification
 from .resume_parser import extract_resume_text,clean_resume_text,extract_resume_skills,extract_experience_years,extract_education
 from pathlib import Path
 from .serializers import (
@@ -124,12 +125,12 @@ class JobListAPI(APIView):
         serializer = JobSerializer(page, many=True)
 
         return paginator.get_paginated_response(serializer.data)
+
 class FeaturedJobListAPI(APIView):
 
     permission_classes = [AllowAny]
 
     def get(self, request):
-
         jobs = Job.objects.filter(
             status='OPEN',
             featured=True
@@ -137,12 +138,23 @@ class FeaturedJobListAPI(APIView):
             'employer'
         ).order_by('-created_at')
 
-        serializer = JobSerializer(
+        paginator = PageNumberPagination()
+        paginator.page_size = 5
+
+        page = paginator.paginate_queryset(
             jobs,
+            request
+        )
+
+        serializer = JobSerializer(
+            page,
             many=True
         )
 
-        return Response(serializer.data)
+        return paginator.get_paginated_response(
+            serializer.data
+        )
+
 class LatestJobListAPI(APIView):
 
     permission_classes = [AllowAny]
@@ -455,6 +467,15 @@ class ApplicationCreateAPI(APIView):
             candidate=candidate,
             status="APPLIED"
         )
+        
+        EmailDeliveryLog.objects.create(
+            application=application,
+            event="APPLICATION_SUBMITTED",
+            recipient=request.user.email,
+            subject="Application Submitted Successfully",
+            status="PENDING",
+        )
+
         ApplicationStatusHistory.objects.create(
             application=application,
             status="APPLIED"
@@ -463,6 +484,8 @@ class ApplicationCreateAPI(APIView):
         # Bind candidate's current resume to application
         application.resume_snapshot = candidate.resume
         application.save(update_fields=["resume_snapshot"])
+        # Send application submission confirmation
+        send_application_submitted_notification(application)
 
         return Response(
             ApplicationSerializer(application).data,
@@ -1323,4 +1346,91 @@ class RankedCandidatesAPI(APIView):
             "job_title": job.title,
             "total_candidates": len(ranked_candidates),
             "ranked_candidates": ranked_candidates,
-        })     
+        }) 
+
+
+class AutoShortlistAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, application_id):
+        try:
+            application = Application.objects.select_related(
+                "job", "candidate", "candidate__user"
+            ).get(id=application_id)
+        except Application.DoesNotExist:
+            return Response(
+                {"error": "Application not found"},
+                status=404,
+            )
+
+        result = auto_shortlist_application(application)
+
+        if not result["success"]:
+            return Response(result, status=400)
+
+        try:
+            result["notification"] = (
+                send_application_status_notification(application)
+            )
+        except Exception:
+            result["notification"] = {
+                "success": False,
+                "message": (
+                    "Status updated, but notification could not be sent."
+                ),
+            }
+
+        return Response(result, status=200)
+
+class EmployerOverrideAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, application_id):
+        new_status = request.data.get("status")
+        allowed_statuses = ["SHORTLISTED", "REJECTED"]
+
+        if new_status not in allowed_statuses:
+            return Response(
+                {
+                    "error": (
+                        "Status must be SHORTLISTED or REJECTED."
+                    )
+                },
+                status=400,
+            )
+
+        try:
+            application = Application.objects.select_related(
+                "job", "job__employer", "job__employer__user"
+            ).get(id=application_id)
+        except Application.DoesNotExist:
+            return Response(
+                {"error": "Application not found"},
+                status=404,
+            )
+
+        if application.job.employer.user_id != request.user.id:
+            return Response(
+                {"error": "You are not authorized to override this application."},
+                status=403,
+            )
+
+        old_status = application.status
+        application.status = new_status
+        application.save(update_fields=["status", "updated_at"])
+
+        ApplicationStatusHistory.objects.create(
+            application=application,
+            status=new_status,
+        )
+
+        return Response(
+            {
+                "success": True,
+                "application_id": application.id,
+                "previous_status": old_status,
+                "new_status": new_status,
+                "overridden_by": request.user.username,
+            },
+            status=200,
+        )    

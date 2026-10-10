@@ -107,6 +107,7 @@ class Job(models.Model):
         default='OPEN'
     )
     featured = models.BooleanField(default=False)
+    ats_cutoff = models.FloatField(default=70.0)
     experience_required = models.PositiveIntegerField()
     deadline = models.DateField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -257,3 +258,41 @@ class ATSScore(models.Model):
             f"Application {self.application.id} "
             f"- ATS Match {self.match_percentage}%"
         )    
+
+class EmailDeliveryLog(models.Model):
+    EVENT_CHOICES = [
+        ("APPLICATION_SUBMITTED", "Application Submitted"),
+        ("SHORTLISTED", "Shortlisted"),
+        ("REJECTED", "Rejected"),
+    ]
+
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("SENT", "Sent"),
+        ("FAILED", "Failed"),
+    ]
+
+    application = models.ForeignKey(
+        "Application",
+        on_delete=models.CASCADE,
+        related_name="email_logs",
+    )
+    event = models.CharField(
+        max_length=30,
+        choices=EVENT_CHOICES,
+    )
+    recipient = models.EmailField()
+    subject = models.CharField(max_length=255)
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    error_message = models.TextField(blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.event} - {self.status} - {self.recipient}"
+    

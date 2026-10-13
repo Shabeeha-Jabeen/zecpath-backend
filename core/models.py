@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.conf import settings
 
 class User(AbstractUser):
     ROLE_CHOICES=[
@@ -341,4 +342,113 @@ class EmailDeliveryLog(models.Model):
 
     def __str__(self):
         return f"{self.event} - {self.status} - {self.recipient}"
+
+class AIInterviewSession(models.Model):
+    STATUS_CHOICES = [
+        ("CREATED", "Created"),
+        ("IN_PROGRESS", "In Progress"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    ]
+
+    application = models.ForeignKey(
+        "Application",
+        on_delete=models.CASCADE,
+        related_name="ai_interview_sessions",
+    )
+    call_log = models.ForeignKey(
+        "AICallLog",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="interview_sessions",
+    )
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="triggered_ai_sessions",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="CREATED",
+    )
+    transcript_text = models.TextField(blank=True)
+    transcript_json = models.JSONField(default=dict, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Interview Session {self.id} - {self.status}"
+
+
+class AIQuestion(models.Model):
+    session = models.ForeignKey(
+        AIInterviewSession,
+        on_delete=models.CASCADE,
+        related_name="questions",
+    )
+    question_text = models.TextField()
+    order = models.PositiveIntegerField(default=1)
+    asked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"Question {self.order} - Session {self.session_id}"
+
+
+class AIAnswer(models.Model):
+    question = models.OneToOneField(
+        AIQuestion,
+        on_delete=models.CASCADE,
+        related_name="answer",
+    )
+    answer_text = models.TextField(blank=True)
+    transcript_text = models.TextField(blank=True)
+    structured_data = models.JSONField(default=dict, blank=True)
+    answered_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Answer for Question {self.question_id}"
+
+
+class CallLog(models.Model):
+    session = models.ForeignKey(
+        AIInterviewSession,
+        on_delete=models.CASCADE,
+        related_name="audit_logs",
+        null=True,
+        blank=True,
+    )
+    call_log = models.ForeignKey(
+        "AICallLog",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+    )
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ai_call_audit_logs",
+    )
+    event_type = models.CharField(max_length=100)
+    reason = models.TextField(blank=True)
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.event_type} - {self.created_at}"
+
     

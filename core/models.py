@@ -31,6 +31,7 @@ class Candidate (models.Model):
     skills=models.TextField()
     education=models.TextField(blank=True)
     experience=models.PositiveIntegerField(default=0)
+    is_available_for_ai_call = models.BooleanField(default=True)
     expected_salary=models.DecimalField(max_digits=10,decimal_places=2,null=True,blank=True)
     resume=models.FileField(upload_to='resumes/',blank=True,null=True)
     created_at=models.DateTimeField(auto_now_add=True)
@@ -235,6 +236,51 @@ class AdminAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} - {self.created_at}"      
+
+class AICallLog(models.Model):
+    STATUS_CHOICES = [
+        ("QUEUED", "Queued"),
+        ("IN_PROGRESS", "In Progress"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    ]
+
+    application = models.ForeignKey(
+        "Application",
+        on_delete=models.CASCADE,
+        related_name="ai_call_logs",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="QUEUED",
+    )
+    celery_task_id = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+    scheduled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+    started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+    retry_count = models.PositiveIntegerField(default=0)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return (
+            f"AI Call - Application {self.application_id} "
+            f"({self.status})"
+        )
 
 class ATSScore(models.Model):
     application = models.OneToOneField(

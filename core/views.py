@@ -1,7 +1,7 @@
 from django.db.models import Q,Count
+from django.conf import settings
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAuthenticated
@@ -13,6 +13,11 @@ from .ats_scoring import auto_shortlist_application,send_application_status_noti
 from core.ats_scoring import calculate_ats_score,send_application_submitted_notification
 from .resume_parser import extract_resume_text,clean_resume_text,extract_resume_skills,extract_experience_years,extract_education
 from pathlib import Path
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from .tasks import process_resume_text_task
+from celery.result import AsyncResult
+from zecpath.celery import app
 from .serializers import (
     ApplicationSerializer,
     CandidateProfileSerializer,
@@ -1193,6 +1198,7 @@ class AdminAuditLogAPI(APIView):
             status=status.HTTP_201_CREATED
         )
 
+
 class ResumeTextExtractionAPI(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
@@ -1203,55 +1209,55 @@ class ResumeTextExtractionAPI(APIView):
         if not resume_file:
             return Response(
                 {"detail": "Please upload a resume file."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        extension = Path(resume_file.name).suffix.lower()
+        filename = Path(resume_file.name).name
+        extension = Path(filename).suffix.lower()
 
         if extension not in [".pdf", ".docx"]:
             return Response(
                 {"detail": "Only PDF and DOCX files are supported."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if resume_file.size > 5 * 1024 * 1024:
             return Response(
                 {"detail": "File size must not exceed 5 MB."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            extracted_text = extract_resume_text(resume_file)
-            cleaned_text = clean_resume_text(extracted_text)
+            # Save the uploaded file to Django's configured storage.
+            saved_name = default_storage.save(
+                f"resume_uploads/{filename}",
+                resume_file,
+            )
+
+            # For this local Windows setup, get the actual filesystem path.
+            saved_path = default_storage.path(saved_name)
+
+            result = process_resume_text_task.delay(
+                saved_path,
+                filename,
+            )
 
         except Exception:
             return Response(
-                {"detail": "Unable to process this file."},
-                status=status.HTTP_400_BAD_REQUEST
+                {"detail": "Unable to queue resume processing."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        if not cleaned_text:
-            return Response(
-                {
-                    "detail": (
-                        "No readable text found. "
-                        "The PDF may require OCR."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        return Response(
+            {
+                "detail": "Resume uploaded. Processing started.",
+                "task_id": result.id,
+                "filename": filename,
+                "status": "PENDING",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
-       
-        return Response({
-            "filename": resume_file.name,
-            "file_type": extension,
-            "extracted_text": extracted_text,
-            "cleaned_text": cleaned_text,
-            "character_count": len(cleaned_text),
-            "skills": extract_resume_skills(cleaned_text),
-            "experience_years": extract_experience_years(cleaned_text),
-            "education": extract_education(cleaned_text),
-        }, status=status.HTTP_200_OK)  
 class ATSMatchPercentageAPI(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1434,3 +1440,22 @@ class EmployerOverrideAPI(APIView):
             },
             status=200,
         )    
+
+class ResumeTaskStatusAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, task_id):
+        task = AsyncResult(task_id, app=app)
+
+        response_data = {
+            "task_id": task_id,
+            "status": task.status,
+        }
+
+        if task.successful():
+            response_data["result"] = task.result
+        elif task.failed():
+            response_data["error"] = "Resume processing failed."
+
+        return Response(response_data, status=status.HTTP_200_OK)
+    

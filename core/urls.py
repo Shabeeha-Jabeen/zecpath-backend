@@ -40,6 +40,7 @@ from .views import (
     RankedCandidatesAPI,
     AutoShortlistAPI,
     EmployerOverrideAPI,
+    ResumeTaskStatusAPI,
     
 
     
@@ -226,5 +227,11 @@ path(
     "applications/<int:application_id>/employer-override/",
     EmployerOverrideAPI.as_view(),
     name="employer-override",
+),
+
+path(
+    "resume/tasks/<str:task_id>/",
+    ResumeTaskStatusAPI.as_view(),
+    name="resume-task-status",
 ),
 ]

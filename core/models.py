@@ -402,6 +402,70 @@ class AIQuestion(models.Model):
     def __str__(self):
         return f"Question {self.order} - Session {self.session_id}"
 
+class QuestionTemplate(models.Model):
+    CATEGORY_CHOICES = [
+        ("INTRODUCTION", "Introduction"),
+        ("EXPERIENCE", "Experience"),
+        ("SKILLS", "Skills"),
+        ("AVAILABILITY", "Availability"),
+        ("SALARY", "Salary"),
+    ]
+
+    ROLE_CHOICES = [
+        ("ALL", "All Roles"),
+        ("PYTHON_DEVELOPER", "Python Developer"),
+        ("DJANGO_DEVELOPER", "Django Developer"),
+        ("BACKEND_DEVELOPER", "Backend Developer"),
+    ]
+
+    question_text = models.TextField()
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+    )
+    role = models.CharField(
+        max_length=30,
+        choices=ROLE_CHOICES,
+        default="ALL",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["category", "id"]
+
+    def __str__(self):
+        return f"{self.category} - {self.question_text[:50]}"
+
+
+class JobQuestionMapping(models.Model):
+    job = models.ForeignKey(
+        "Job",
+        on_delete=models.CASCADE,
+        related_name="question_mappings",
+    )
+    question_template = models.ForeignKey(
+        QuestionTemplate,
+        on_delete=models.CASCADE,
+        related_name="job_mappings",
+    )
+    order = models.PositiveIntegerField(default=1)
+    is_required = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["job", "question_template"],
+                name="unique_job_question_template",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.job.title} - Question {self.order}"
+    
+
 
 class AIAnswer(models.Model):
     question = models.OneToOneField(

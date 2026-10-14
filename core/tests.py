@@ -4,6 +4,10 @@ from rest_framework.test import APIClient
 from datetime import date, timedelta
 from rest_framework import status
 from .models import User, Candidate, Employer, Job, Application
+from core.ai_question_engine import (
+    get_questions_for_job,
+    get_follow_up_question,
+)
 class JobListAPITest(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -144,3 +148,27 @@ class ApplicationFlowTest(TestCase):
 
         self.assertEqual(response.status_code, 400)
     
+
+class AIQuestionEngineTests(TestCase):
+
+    def test_invalid_job(self):
+        result = get_questions_for_job(9999)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["message"], "Job not found.")
+
+    def test_follow_up_for_python(self):
+        result = get_follow_up_question("I know Python")
+
+        self.assertEqual(result["category"], "SKILLS")
+        self.assertIn("Django", result["question_text"])
+
+    def test_follow_up_for_beginner(self):
+        result = get_follow_up_question("I am a beginner")
+
+        self.assertEqual(result["category"], "EXPERIENCE")
+
+    def test_follow_up_for_empty_answer(self):
+        result = get_follow_up_question("")
+
+        self.assertEqual(result["category"], "SKILLS")

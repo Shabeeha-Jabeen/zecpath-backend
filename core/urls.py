@@ -41,6 +41,8 @@ from .views import (
     AutoShortlistAPI,
     EmployerOverrideAPI,
     ResumeTaskStatusAPI,
+    AnswerEvaluationAPI,
+    AnswerScoreDetailAPI,
     
 
     
@@ -233,5 +235,15 @@ path(
     "resume/tasks/<str:task_id>/",
     ResumeTaskStatusAPI.as_view(),
     name="resume-task-status",
+),
+path(
+    "answers/<int:answer_id>/evaluate/",
+    AnswerEvaluationAPI.as_view(),
+    name="answer-evaluation",
+),
+path(
+    "answers/<int:answer_id>/scores/",
+    AnswerScoreDetailAPI.as_view(),
+    name="answer-score-detail",
 ),
 ]

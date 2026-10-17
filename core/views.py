@@ -5,9 +5,10 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAuthenticated
-from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog,ATSScore,EmailDeliveryLog
+from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog,ATSScore,EmailDeliveryLog,AIAnswer
 from .permissions import IsCandidate, IsEmployer,IsPlatformAdmin
 from rest_framework.parsers import MultiPartParser, FormParser
+from core.answer_scoring import evaluate_and_save_answer
 from django.db.models.functions import TruncMonth
 from .ats_scoring import auto_shortlist_application,send_application_status_notification
 from core.ats_scoring import calculate_ats_score,send_application_submitted_notification
@@ -1458,4 +1459,79 @@ class ResumeTaskStatusAPI(APIView):
             response_data["error"] = "Resume processing failed."
 
         return Response(response_data, status=status.HTTP_200_OK)
+
+class AnswerEvaluationAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, answer_id):
+        expected_keywords = request.data.get("expected_keywords", [])
+
+        if not isinstance(expected_keywords, list):
+            return Response(
+                {"error": "expected_keywords must be a list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        confidence_score = request.data.get("confidence_score")
+        if confidence_score is not None:
+            try:
+                confidence_score = float(confidence_score)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "confidence_score must be a number."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not 0 <= confidence_score <= 100:
+                return Response(
+                    {"error": "confidence_score must be between 0 and 100."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        ai_annotations = request.data.get("ai_annotations", {})
+        if not isinstance(ai_annotations, dict):
+            return Response(
+                {"error": "ai_annotations must be an object."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            result = evaluate_and_save_answer(
+                answer_id=answer_id,
+                expected_keywords=expected_keywords,
+                confidence_score=confidence_score,
+                ai_annotations=ai_annotations,
+            )
+        except AIAnswer.DoesNotExist:
+            return Response(
+                {"error": "Answer not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class AnswerScoreDetailAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, answer_id):
+        try:
+            answer = AIAnswer.objects.get(id=answer_id)
+        except AIAnswer.DoesNotExist:
+            return Response(
+                {"error": "Answer not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response({
+            "answer_id": answer.id,
+            "question_id": answer.question_id,
+            "relevance_score": answer.relevance_score,
+            "completeness_score": answer.completeness_score,
+            "keyword_score": answer.keyword_score,
+            "total_score": answer.total_score,
+            "confidence_score": answer.confidence_score,
+            "ai_annotations": answer.ai_annotations,
+        }, status=status.HTTP_200_OK)
+    
     

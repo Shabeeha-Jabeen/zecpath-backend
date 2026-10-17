@@ -471,16 +471,41 @@ class AIAnswer(models.Model):
     question = models.OneToOneField(
         AIQuestion,
         on_delete=models.CASCADE,
-        related_name="answer",
+        related_name="answer"
     )
     answer_text = models.TextField(blank=True)
     transcript_text = models.TextField(blank=True)
     structured_data = models.JSONField(default=dict, blank=True)
-    answered_at = models.DateTimeField(null=True, blank=True)
+
+    # Day 37: Answer evaluation fields
+    confidence_score = models.FloatField(
+        null=True,
+        blank=True
+    )
+    ai_annotations = models.JSONField(
+        default=dict,
+        blank=True
+    )
+    relevance_score = models.FloatField(
+        default=0,
+    )
+    completeness_score = models.FloatField(
+        default=0,
+    )
+    keyword_score = models.FloatField(
+        default=0,
+    )
+    total_score = models.FloatField(
+        default=0,
+    )
+
+    answered_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
 
     def __str__(self):
         return f"Answer for Question {self.question_id}"
-
 
 class CallLog(models.Model):
     session = models.ForeignKey(

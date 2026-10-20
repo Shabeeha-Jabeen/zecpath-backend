@@ -3,6 +3,15 @@ from django.conf import settings
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.parsers import JSONParser
+
+
+from core.models import AvailabilitySlot
+from core.interview_scheduler import (
+    get_available_slots,
+    schedule_interview,
+    reschedule_interview,
+)
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAuthenticated
 from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog,ATSScore,EmailDeliveryLog,AIAnswer
@@ -1533,5 +1542,87 @@ class AnswerScoreDetailAPI(APIView):
             "confidence_score": answer.confidence_score,
             "ai_annotations": answer.ai_annotations,
         }, status=status.HTTP_200_OK)
+
+
+
+class AvailableInterviewSlotsAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        role = request.query_params.get("role")
+
+        slots = get_available_slots(role=role)
+
+        data = [
+            {
+                "id": slot.id,
+                "role": slot.role,
+                "start_time": slot.start_time.isoformat(),
+                "end_time": slot.end_time.isoformat(),
+            }
+            for slot in slots
+        ]
+
+        return Response({
+            "count": len(data),
+            "slots": data,
+        })
+
+
+class ScheduleInterviewAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        application_id = request.data.get("application_id")
+        slot_id = request.data.get("slot_id")
+
+        if not application_id or not slot_id:
+            return Response(
+                {
+                    "success": False,
+                    "message": "application_id and slot_id are required.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = schedule_interview(
+            application_id=application_id,
+            slot_id=slot_id,
+        )
+
+        response_status = (
+            status.HTTP_201_CREATED
+            if result.get("success")
+            else status.HTTP_400_BAD_REQUEST
+        )
+
+        return Response(result, status=response_status)
     
-    
+class RescheduleInterviewAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        schedule_id = request.data.get("schedule_id")
+        new_slot_id = request.data.get("new_slot_id")
+
+        if not schedule_id or not new_slot_id:
+            return Response(
+                {
+                    "success": False,
+                    "message": "schedule_id and new_slot_id are required.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = reschedule_interview(
+            schedule_id=schedule_id,
+            new_slot_id=new_slot_id,
+        )
+
+        response_status = (
+            status.HTTP_200_OK
+            if result.get("success")
+            else status.HTTP_400_BAD_REQUEST
+        )
+
+        return Response(result, status=response_status)    

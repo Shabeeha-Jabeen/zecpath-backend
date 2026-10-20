@@ -540,4 +540,64 @@ class CallLog(models.Model):
     def __str__(self):
         return f"{self.event_type} - {self.created_at}"
 
+class AvailabilitySlot(models.Model):
+    ROLE_CHOICES = [
+        ("ALL", "All Roles"),
+        ("PYTHON", "Python Developer"),
+        ("DJANGO", "Django Developer"),
+        ("FULLSTACK", "Full Stack Developer"),
+    ]
+
+    role = models.CharField(
+        max_length=20,
+        choices=ROLE_CHOICES,
+        default="ALL",
+    )
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
+    is_available = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.role}: {self.start_time} - {self.end_time}"
+
+
+class InterviewSchedule(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("CONFIRMED", "Confirmed"),
+        ("CANCELLED", "Cancelled"),
+    ]
+
+    application = models.ForeignKey(
+        "Application",
+        on_delete=models.CASCADE,
+        related_name="interview_schedules",
+    )
+    availability_slot = models.ForeignKey(
+        AvailabilitySlot,
+        on_delete=models.PROTECT,
+        related_name="interview_schedules",
+    )
+    scheduled_start = models.DateTimeField()
+    scheduled_end = models.DateTimeField()
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    confirmation_email_sent = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["availability_slot"],
+                condition=~models.Q(status="CANCELLED"),
+                name="unique_active_interview_per_slot",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Interview {self.id} - {self.status}"
+   
+
     

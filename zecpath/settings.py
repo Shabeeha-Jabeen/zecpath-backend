@@ -138,6 +138,7 @@ REST_FRAMEWORK = {
 
 }
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = "noreply@zecpath.local"
 
 # Celery Configuration
 CELERY_TASK_IGNORE_RESULT = False

@@ -43,6 +43,9 @@ from .views import (
     ResumeTaskStatusAPI,
     AnswerEvaluationAPI,
     AnswerScoreDetailAPI,
+    AvailableInterviewSlotsAPI,
+    ScheduleInterviewAPI,
+    RescheduleInterviewAPI,
     
 
     
@@ -245,5 +248,20 @@ path(
     "answers/<int:answer_id>/scores/",
     AnswerScoreDetailAPI.as_view(),
     name="answer-score-detail",
+),
+path(
+    "interview/slots/",
+    AvailableInterviewSlotsAPI.as_view(),
+    name="available-interview-slots",
+),
+path(
+    "interview/schedule/",
+    ScheduleInterviewAPI.as_view(),
+    name="schedule-interview",
+),
+path(
+    "interview/reschedule/",
+    RescheduleInterviewAPI.as_view(),
+    name="reschedule-interview",
 ),
 ]

@@ -599,5 +599,47 @@ class InterviewSchedule(models.Model):
     def __str__(self):
         return f"Interview {self.id} - {self.status}"
    
+class InterviewReminder(models.Model):
+    STAGE_CHOICES = [
+        ("24_HOURS", "24 Hours Before"),
+        ("1_HOUR", "1 Hour Before"),
+    ]
 
-    
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("SENT", "Sent"),
+        ("FAILED", "Failed"),
+        ("CANCELLED", "Cancelled"),
+    ]
+
+    interview = models.ForeignKey(
+        "core.InterviewSchedule",
+        on_delete=models.CASCADE,
+        related_name="reminders",
+    )
+    stage = models.CharField(
+        max_length=20,
+        choices=STAGE_CHOICES,
+    )
+    scheduled_at = models.DateTimeField()
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    attempts = models.PositiveIntegerField(default=0)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["interview", "stage"],
+                name="unique_reminder_per_interview_stage",
+            )
+        ]
+        ordering = ["scheduled_at"]
+
+    def __str__(self):
+        return f"{self.interview_id} - {self.stage} - {self.status}"

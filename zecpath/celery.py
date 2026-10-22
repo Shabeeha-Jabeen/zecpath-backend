@@ -15,5 +15,11 @@ app.conf.beat_schedule = {
         "task": "core.tasks.expire_deadline_jobs_task",
         "schedule": crontab(minute=0, hour=3),
     },
+    
+    "process-interview-reminders-every-minute": {
+        "task": "core.tasks.process_interview_reminders_task",
+        "schedule": crontab(minute="*"),
+    },
+
 }
 

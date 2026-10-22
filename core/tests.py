@@ -1,9 +1,11 @@
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
+from unittest.mock import patch
+from django.utils import timezone
 from datetime import date, timedelta
 from rest_framework import status
-from .models import User, Candidate, Employer, Job, Application
+from .models import User, Candidate, Employer, Job, Application, AvailabilitySlot,InterviewSchedule,InterviewReminder
 from core.ai_question_engine import (
     get_questions_for_job,
     get_follow_up_question,
@@ -172,3 +174,143 @@ class AIQuestionEngineTests(TestCase):
         result = get_follow_up_question("")
 
         self.assertEqual(result["category"], "SKILLS")
+
+
+class InterviewReminderAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.user1 = User.objects.create_user(
+            username="reminder_candidate1",
+            email="reminder1@example.com",
+            password="TestPass123!",
+            role="CANDIDATE",
+        )
+        self.candidate1 = Candidate.objects.get(user=self.user1)
+        self.candidate1.phone = "9876543210"
+        self.candidate1.address = "Kozhikode"
+        self.candidate1.skills = "Python"
+        self.candidate1.save()
+
+        self.user2 = User.objects.create_user(
+            username="reminder_candidate2",
+            email="reminder2@example.com",
+            password="TestPass123!",
+            role="CANDIDATE",
+        )
+        self.candidate2 = Candidate.objects.get(user=self.user2)
+        self.candidate2.phone = "9876543211"
+        self.candidate2.address = "Malappuram"
+        self.candidate2.skills = "Django"
+        self.candidate2.save()
+
+        employer_user = User.objects.create_user(
+            username="reminder_employer",
+            email="reminder_employer@example.com",
+            password="TestPass123!",
+            role="EMPLOYER",
+        )
+        employer = Employer.objects.get(user=employer_user)
+        employer.company_name = "Reminder Test Company"
+        employer.company_email = "company@example.com"
+        employer.company_phone = "9876543212"
+        employer.location = "Kozhikode"
+        employer.description = "Test company"
+        employer.save()
+
+        self.job = Job.objects.create(
+            employer=employer,
+            title="Python Developer",
+            description="Test job",
+            skills="Python",
+            location="Kozhikode",
+            job_type="Full-time",
+            experience_required=0,
+            deadline=date.today() + timedelta(days=30),
+        )
+
+        self.application1 = Application.objects.create(
+            candidate=self.candidate1,
+            job=self.job,
+            cover_letter="Candidate one",
+        )
+        self.application2 = Application.objects.create(
+            candidate=self.candidate2,
+            job=self.job,
+            cover_letter="Candidate two",
+        )
+
+        start = timezone.now() + timedelta(days=2)
+        slot1 = AvailabilitySlot.objects.create(
+            start_time=start,
+            end_time=start + timedelta(hours=1),
+        )
+        slot2 = AvailabilitySlot.objects.create(
+            start_time=start + timedelta(days=1),
+            end_time=start + timedelta(days=1, hours=1),
+        )
+
+        interview1 = InterviewSchedule.objects.create(
+            application=self.application1,
+            availability_slot=slot1,
+            scheduled_start=slot1.start_time,
+            scheduled_end=slot1.end_time,
+            status="CONFIRMED",
+        )
+        interview2 = InterviewSchedule.objects.create(
+            application=self.application2,
+            availability_slot=slot2,
+            scheduled_start=slot2.start_time,
+            scheduled_end=slot2.end_time,
+            status="CONFIRMED",
+        )
+
+        self.reminder1 = InterviewReminder.objects.create(
+            interview=interview1,
+            stage="24_HOURS",
+            scheduled_at=start - timedelta(hours=24),
+            status="PENDING",
+        )
+        InterviewReminder.objects.create(
+            interview=interview2,
+            stage="24_HOURS",
+            scheduled_at=start + timedelta(days=1) - timedelta(hours=24),
+            status="SENT",
+            attempts=1,
+            sent_at=timezone.now(),
+        )
+
+    def test_unauthenticated_user_cannot_access_reminders(self):
+        response = self.client.get("/api/interview/reminders/")
+        self.assertIn(response.status_code, [401, 403])
+
+    def test_candidate_only_sees_own_reminders(self):
+        self.client.force_authenticate(user=self.user1)
+
+        response = self.client.get("/api/interview/reminders/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], self.reminder1.id)
+        self.assertEqual(response.data[0]["status"], "PENDING")
+        self.assertEqual(response.data[0]["attempts"], 0)
+
+class InterviewReminderTaskTests(TestCase):
+    @patch("core.reminder_service.process_due_reminders")
+    def test_reminder_task_calls_processing_service(self, mock_process):
+        mock_process.return_value = {
+            "processed": 2,
+            "sent": 1,
+            "failed": 1,
+        }
+
+        from core.tasks import process_interview_reminders_task
+
+        result = process_interview_reminders_task.apply(
+            throw=True
+        ).get()
+
+        self.assertEqual(result["processed"], 2)
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(result["failed"], 1)
+        mock_process.assert_called_once_with()

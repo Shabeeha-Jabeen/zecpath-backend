@@ -3,6 +3,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from django.core.mail import send_mail
+from core.reminder_service import create_reminders_for_interview,cancel_pending_reminders
 
 from core.models import (
     Application,
@@ -105,6 +106,7 @@ def schedule_interview(application_id, slot_id):
     if email_result.get("success"):
         schedule.confirmation_email_sent = True
         schedule.save(update_fields=["confirmation_email_sent"])
+    create_reminders_for_interview(schedule)
 
     return {
         "success": True,
@@ -230,7 +232,7 @@ def reschedule_interview(schedule_id, new_slot_id):
         with transaction.atomic():
             old_schedule.status = "CANCELLED"
             old_schedule.save(update_fields=["status"])
-
+            cancel_pending_reminders(old_schedule)
             new_schedule = InterviewSchedule.objects.create(
                 application=old_schedule.application,
                 availability_slot=new_slot,
@@ -249,7 +251,7 @@ def reschedule_interview(schedule_id, new_slot_id):
     if email_result.get("success"):
         new_schedule.confirmation_email_sent = True
         new_schedule.save(update_fields=["confirmation_email_sent"])
-
+        create_reminders_for_interview(new_schedule)
     return {
         "success": True,
         "old_schedule_id": old_schedule.id,

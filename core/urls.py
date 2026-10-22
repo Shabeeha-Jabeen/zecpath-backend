@@ -46,6 +46,7 @@ from .views import (
     AvailableInterviewSlotsAPI,
     ScheduleInterviewAPI,
     RescheduleInterviewAPI,
+    InterviewReminderListAPI,
     
 
     
@@ -263,5 +264,10 @@ path(
     "interview/reschedule/",
     RescheduleInterviewAPI.as_view(),
     name="reschedule-interview",
+),
+path(
+    "interview/reminders/",
+    InterviewReminderListAPI.as_view(),
+    name="interview-reminders",
 ),
 ]

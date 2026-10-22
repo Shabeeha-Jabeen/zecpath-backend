@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import JSONParser
 
 
-from core.models import AvailabilitySlot
+from core.models import AvailabilitySlot,InterviewReminder
 from core.interview_scheduler import (
     get_available_slots,
     schedule_interview,
@@ -1626,3 +1626,37 @@ class RescheduleInterviewAPI(APIView):
         )
 
         return Response(result, status=response_status)    
+
+class InterviewReminderListAPI(APIView):
+    permission_classes = [IsAuthenticated, IsCandidate]
+
+    def get(self, request):
+        reminders = InterviewReminder.objects.filter(
+            interview__application__candidate__user=request.user
+        ).select_related(
+            "interview__application__job"
+        ).order_by("scheduled_at")
+
+        data = []
+
+        for reminder in reminders:
+            data.append({
+                "id": reminder.id,
+                "interview_id": reminder.interview_id,
+                "job_title": str(reminder.interview.application.job),
+                "interview_start": (
+                    reminder.interview.scheduled_start.isoformat()
+                ),
+                "stage": reminder.stage,
+                "scheduled_at": reminder.scheduled_at.isoformat(),
+                "status": reminder.status,
+                "attempts": reminder.attempts,
+                "sent_at": (
+                    reminder.sent_at.isoformat()
+                    if reminder.sent_at else None
+                ),
+                "last_error": reminder.last_error,
+            })
+
+        return Response(data, status=status.HTTP_200_OK)
+    

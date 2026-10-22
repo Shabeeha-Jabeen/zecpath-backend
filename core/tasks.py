@@ -206,3 +206,9 @@ def expire_deadline_jobs_task():
         "expired_jobs_count": expired_count,
         "checked_date": str(today),
     }
+
+@shared_task
+def process_interview_reminders_task():
+    from core.reminder_service import process_due_reminders
+
+    return process_due_reminders()

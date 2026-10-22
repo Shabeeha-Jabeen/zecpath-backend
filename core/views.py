@@ -4,7 +4,8 @@ from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.parsers import JSONParser
-
+from .models import Application
+from .report_service import generate_candidate_report
 
 from core.models import AvailabilitySlot,InterviewReminder
 from core.interview_scheduler import (
@@ -1659,4 +1660,39 @@ class InterviewReminderListAPI(APIView):
             })
 
         return Response(data, status=status.HTTP_200_OK)
+
+
+class CandidateReportAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, application_id):
+        # Only employers/recruiters can access reports.
+        if request.user.role != "EMPLOYER":
+            return Response(
+                {"detail": "Only employers can access candidate reports."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Restrict access to applications for this employer's own jobs.
+        application = Application.objects.filter(
+            id=application_id,
+            job__employer__user=request.user,
+        ).first()
+
+        if application is None:
+            return Response(
+                {"detail": "Application not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        report = generate_candidate_report(application.id)
+
+        if report is None:
+            return Response(
+                {"detail": "Candidate report could not be generated."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(report, status=status.HTTP_200_OK)
+
     

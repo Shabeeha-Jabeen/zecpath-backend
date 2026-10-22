@@ -47,6 +47,7 @@ from .views import (
     ScheduleInterviewAPI,
     RescheduleInterviewAPI,
     InterviewReminderListAPI,
+    CandidateReportAPI,
     
 
     
@@ -269,5 +270,10 @@ path(
     "interview/reminders/",
     InterviewReminderListAPI.as_view(),
     name="interview-reminders",
+),
+path(
+    "applications/<int:application_id>/report/",
+    CandidateReportAPI.as_view(),
+    name="candidate-report",
 ),
 ]

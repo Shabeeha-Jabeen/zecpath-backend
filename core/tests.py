@@ -1,4 +1,6 @@
 from django.test import TestCase
+from django.core.cache import cache
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 from unittest.mock import patch
@@ -40,6 +42,44 @@ class AuthenticationAPITest(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+        
+    @override_settings(
+        REST_FRAMEWORK={
+            "DEFAULT_AUTHENTICATION_CLASSES": [
+                "rest_framework_simplejwt.authentication.JWTAuthentication",
+            ],
+            "EXCEPTION_HANDLER": "core.exceptions.custom_exception_handler",
+            "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+            "PAGE_SIZE": 5,
+            "DEFAULT_THROTTLE_CLASSES": [
+                "rest_framework.throttling.ScopedRateThrottle",
+            ],
+            "DEFAULT_THROTTLE_RATES": {
+                "login": "5/minute",
+            },
+        }
+    )
+    def test_login_throttle_returns_429_after_limit(self):
+        cache.clear()
+        try:
+            responses = []
+
+            for _ in range(6):
+                response = self.client.post(
+                    "/api/login/",
+                    {
+                        "username": "invalid_test_user",
+                        "password": "WrongPassword123!",
+                    },
+                    format="json",
+                )
+                responses.append(response.status_code)
+
+            self.assertEqual(responses[:5], [401] * 5)
+            self.assertEqual(responses[5], 429)
+        finally:
+            cache.clear()
+
 
 class ApplicationSecurityTest(TestCase):
     def setUp(self):

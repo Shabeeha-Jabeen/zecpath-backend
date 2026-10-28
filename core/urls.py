@@ -52,12 +52,13 @@ from .views import (
     RecruiterJobPerformanceAPI,
     RecruiterTimeAnalyticsAPI,
     RecruiterRoleAnalyticsAPI,
+    ThrottledTokenObtainPairView,
 
     
 )
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
+    
 )
 
 
@@ -66,7 +67,11 @@ urlpatterns = [
     path('jobs/create/', JobCreateAPI.as_view(), name='job-create'),
     path('test/', UserTestAPI.as_view(), name='test-api'),
     path('register/', UserRegistrationAPI.as_view(), name='user-register'),
-    path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path(
+    'login/',
+    ThrottledTokenObtainPairView.as_view(),
+    name='token_obtain_pair',
+),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path(
     'applications/create/',

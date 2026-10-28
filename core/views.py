@@ -6,6 +6,8 @@ from rest_framework.response import Response
 from rest_framework.parsers import JSONParser
 from .models import Application
 from .report_service import generate_candidate_report
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenObtainPairView
 from django.core.cache import cache
 from core.models import AvailabilitySlot,InterviewReminder
 from core.interview_scheduler import (
@@ -1964,5 +1966,7 @@ class CandidateReportAPI(APIView):
             )
 
         return Response(report, status=status.HTTP_200_OK)
-
+class ThrottledTokenObtainPairView(TokenObtainPairView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
     

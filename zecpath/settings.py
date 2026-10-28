@@ -23,7 +23,10 @@ load_dotenv(BASE_DIR / ".env")
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-%26+q$1q%ky$g1b7&)$$!ia1k45a&4o(g1b88c(hu8ezrb8fd0'
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY is missing. Check your .env file.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True

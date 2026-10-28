@@ -123,3 +123,24 @@ class AIConversationTest(TestCase):
         self.assertEqual(log.triggered_by, self.user)
         self.assertEqual(log.event_type, "AI_CALL_TRIGGERED")
         self.assertEqual(log.details["source"], "test")
+
+    def test_transcript_is_encrypted_in_database(self):
+        from django.db import connection
+
+        original = "Sensitive transcript for encryption test"
+
+        self.session.transcript_text = original
+        self.session.save(update_fields=["transcript_text"])
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT transcript_text FROM core_aiinterviewsession WHERE id = %s",
+                [self.session.id],
+            )
+            raw_value = cursor.fetchone()[0]
+
+        self.assertNotEqual(raw_value, original)
+        self.assertTrue(raw_value.startswith("enc:v1:"))
+
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.transcript_text, original)

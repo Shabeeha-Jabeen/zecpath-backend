@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
-
+from .encrypted_fields import EncryptedTextField
 class User(AbstractUser):
     ROLE_CHOICES=[
         ('ADMIN','Admin'),
@@ -382,7 +382,7 @@ class AIInterviewSession(models.Model):
         choices=STATUS_CHOICES,
         default="CREATED",
     )
-    transcript_text = models.TextField(blank=True)
+    transcript_text = EncryptedTextField(blank=True)
     transcript_json = models.JSONField(default=dict, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
@@ -480,8 +480,8 @@ class AIAnswer(models.Model):
         on_delete=models.CASCADE,
         related_name="answer"
     )
-    answer_text = models.TextField(blank=True)
-    transcript_text = models.TextField(blank=True)
+    answer_text = EncryptedTextField(blank=True)
+    transcript_text = EncryptedTextField(blank=True)
     structured_data = models.JSONField(default=dict, blank=True)
 
     # Day 37: Answer evaluation fields

@@ -11,3 +11,5 @@ celerybeat-schedule-wal
 .env
 # Application and security logs
 logs/
+
+db_backup_before_encryption_*.sqlite3

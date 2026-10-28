@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import JSONParser
 from .models import Application
 from .report_service import generate_candidate_report
-
+from django.core.cache import cache
 from core.models import AvailabilitySlot,InterviewReminder
 from core.interview_scheduler import (
     get_available_slots,
@@ -398,7 +398,253 @@ class EmployerDashboardAPI(APIView):
             "rejected": rejected_count,
             "selected": selected_count,
             "shortlist_ratio": shortlist_ratio
-        })          
+        })
+
+class RecruiterFunnelAnalyticsAPI(APIView):
+    permission_classes = [IsEmployer]
+
+    def get(self, request):
+        employer = request.user.employer_profile
+
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        job_id = request.query_params.get("job_id")
+
+        jobs = Job.objects.filter(employer=employer)
+
+        if job_id:
+            if not job_id.isdigit():
+                return Response(
+                    {"error": "job_id must be a valid integer"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            jobs = jobs.filter(id=int(job_id))
+
+        applications = Application.objects.filter(job__in=jobs)
+
+        if start_date:
+            applications = applications.filter(
+                applied_at__date__gte=start_date
+            )
+
+        if end_date:
+            applications = applications.filter(
+                applied_at__date__lte=end_date
+            )
+
+        application_ids = applications.values("id")
+
+        total_applied = applications.count()
+
+        # Count each application only once per historical stage.
+        shortlisted = ApplicationStatusHistory.objects.filter(
+            application_id__in=application_ids,
+            status="SHORTLISTED",
+        ).values("application_id").distinct().count()
+
+        interview_scheduled = ApplicationStatusHistory.objects.filter(
+            application_id__in=application_ids,
+            status="INTERVIEW_SCHEDULED",
+        ).values("application_id").distinct().count()
+
+        selected = ApplicationStatusHistory.objects.filter(
+            application_id__in=application_ids,
+            status="SELECTED",
+        ).values("application_id").distinct().count()
+
+        rejected = ApplicationStatusHistory.objects.filter(
+            application_id__in=application_ids,
+            status="REJECTED",
+        ).values("application_id").distinct().count()
+
+        def conversion_rate(stage_count, previous_count):
+            if previous_count == 0:
+                return 0.0
+            return round((stage_count / previous_count) * 100, 2)
+
+        data = {
+            "total_applied": total_applied,
+            "shortlisted": shortlisted,
+            "interview_scheduled": interview_scheduled,
+            "selected": selected,
+            "rejected": rejected,
+            "application_to_shortlist_rate": conversion_rate(
+                shortlisted, total_applied
+            ),
+            "shortlist_to_interview_rate": conversion_rate(
+                interview_scheduled, shortlisted
+            ),
+            "interview_to_selection_rate": conversion_rate(
+                selected, interview_scheduled
+            ),
+        }
+
+        return Response(data)
+
+
+
+
+class RecruiterJobPerformanceAPI(APIView):
+    permission_classes = [IsEmployer]
+
+    def get(self, request):
+        employer = request.user.employer_profile
+
+        # Create a unique cache key for employer and date filters
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+
+        cache_key = (
+            f"job_performance_{employer.id}_"
+            f"{start_date or ''}_"
+            f"{end_date or ''}"
+        )
+
+        # Return cached response if available
+        cached_data = cache.get(cache_key)
+
+        if cached_data is not None:
+            return Response(cached_data)
+
+        # Get jobs belonging to the logged-in employer
+        jobs = Job.objects.filter(
+            employer=employer
+        )
+
+        # Apply date filters
+        if start_date:
+            jobs = jobs.filter(
+                applications__applied_at__date__gte=start_date
+            )
+
+        if end_date:
+            jobs = jobs.filter(
+                applications__applied_at__date__lte=end_date
+            )
+
+        # Aggregate application and status-history counts
+        jobs = jobs.annotate(
+            total_applications=Count(
+                "applications",
+                distinct=True,
+            ),
+            shortlisted=Count(
+                "applications__status_history__application",
+                filter=Q(
+                    applications__status_history__status="SHORTLISTED"
+                ),
+                distinct=True,
+            ),
+            selected=Count(
+                "applications__status_history__application",
+                filter=Q(
+                    applications__status_history__status="SELECTED"
+                ),
+                distinct=True,
+            ),
+        ).order_by("-created_at").distinct()
+
+        # Prepare job-wise results
+        results = []
+
+        for job in jobs:
+            total = job.total_applications
+            shortlisted = job.shortlisted
+            selected = job.selected
+
+            results.append({
+                "job_id": job.id,
+                "job_title": job.title,
+                "total_applications": total,
+                "shortlisted": shortlisted,
+                "selected": selected,
+                "selection_rate": (
+                    round(selected / total * 100, 2)
+                    if total
+                    else 0.0
+                ),
+            })
+
+        # Prepare response data
+        response_data = {
+            "total_jobs": len(results),
+            "jobs": results,
+        }
+
+        # Cache the response for 5 minutes
+        cache.set(
+            cache_key,
+            response_data,
+            timeout=300,
+        )
+
+        return Response(response_data)
+
+
+class RecruiterTimeAnalyticsAPI(APIView):
+    permission_classes = [IsEmployer]
+
+    def get(self, request):
+        employer = request.user.employer_profile
+
+        monthly_stats = (
+            Application.objects.filter(
+                job__employer=employer
+            )
+            .annotate(
+                month=TruncMonth("applied_at")
+            )
+            .values("month")
+            .annotate(
+                total_applications=Count("id")
+            )
+            .order_by("month")
+        )
+
+        data = [
+            {
+                "month": item["month"].strftime("%Y-%m"),
+                "total_applications": item["total_applications"],
+            }
+            for item in monthly_stats
+        ]
+
+        return Response({
+            "total_months": len(data),
+            "monthly_applications": data,
+        })
+    
+class RecruiterRoleAnalyticsAPI(APIView):
+    permission_classes = [IsEmployer]
+
+    def get(self, request):
+        employer = request.user.employer_profile
+
+        role_stats = (
+            Application.objects.filter(
+                job__employer=employer
+            )
+            .values("job__job_type")
+            .annotate(
+                total_applications=Count("id"),
+                total_jobs=Count("job", distinct=True),
+            )
+            .order_by("job__job_type")
+        )
+
+        data = [
+            {
+                "job_type": item["job__job_type"],
+                "total_jobs": item["total_jobs"],
+                "total_applications": item["total_applications"],
+            }
+            for item in role_stats
+        ]
+
+        return Response({
+            "total_job_types": len(data),
+            "job_type_analytics": data,
+        })
 
 class UserTestAPI(APIView):
     def get(self, request):
@@ -895,6 +1141,7 @@ class EmployerApprovalAPI(APIView):
         employer.save(update_fields=["is_verified", "updated_at"])
         AdminAuditLog.objects.create(
             admin=request.user,
+            actor=request.user,
             action="EMPLOYER_APPROVAL_UPDATED",
             details=(
                 f"Employer ID {employer.id} verification "
@@ -942,6 +1189,7 @@ class UserBlockAPI(APIView):
         user.save(update_fields=["is_active"])
         AdminAuditLog.objects.create(
             admin=request.user,
+	    actor=request.user,
             action="USER_STATUS_UPDATED",
             details=f"User ID {user.id} is_active set to {user.is_active}."
         )
@@ -985,6 +1233,7 @@ class AdminJobDeleteAPI(APIView):
 
         AdminAuditLog.objects.create(
             admin=request.user,
+	    actor=request.user,
             action="JOB_POST_DELETED",
             details=(
                 f"Job ID {deleted_job_id}, "
@@ -1084,6 +1333,7 @@ class AccountFlagAPI(APIView):
         )
         AdminAuditLog.objects.create(
         admin=request.user,
+	actor=request.user,
         action="ACCOUNT_FLAGGED",
         details=(
             f"User ID {flag.user_id} was flagged. "
@@ -1144,6 +1394,7 @@ class ResolveAccountFlagAPI(APIView):
         flag.save(update_fields=["is_resolved"])
         AdminAuditLog.objects.create(
             admin=request.user,
+	    actor=request.user,
             action="ACCOUNT_FLAG_RESOLVED",
             details=(
                 f"Account flag ID {flag.id} resolved "
@@ -1162,21 +1413,30 @@ class ResolveAccountFlagAPI(APIView):
         )    
 
 
+
 class AdminAuditLogAPI(APIView):
     permission_classes = [IsPlatformAdmin]
 
     def get(self, request):
         logs = AdminAuditLog.objects.select_related(
-            "admin"
+            "admin",
+            "actor",
         ).order_by("-created_at")
 
         data = [
             {
                 "id": log.id,
-                "admin": log.admin.username if log.admin else None,
+                "admin": (
+                    log.admin.username
+                    if log.admin else None
+                ),
+                "actor": (
+                    log.actor.username
+                    if log.actor else None
+                ),
                 "action": log.action,
                 "details": log.details,
-                "created_at": log.created_at
+                "created_at": log.created_at,
             }
             for log in logs
         ]
@@ -1190,23 +1450,33 @@ class AdminAuditLogAPI(APIView):
         if not action:
             return Response(
                 {"detail": "action is required."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         log = AdminAuditLog.objects.create(
             admin=request.user,
+            actor=request.user,
             action=action,
-            details=details
+            details=details,
         )
 
         return Response(
             {
                 "message": "Audit log created successfully.",
                 "id": log.id,
+                "admin": (
+                    log.admin.username
+                    if log.admin else None
+                ),
+                "actor": (
+                    log.actor.username
+                    if log.actor else None
+                ),
                 "action": log.action,
-                "details": log.details
+                "details": log.details,
+                "created_at": log.created_at,
             },
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_201_CREATED,
         )
 
 

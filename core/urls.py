@@ -48,7 +48,10 @@ from .views import (
     RescheduleInterviewAPI,
     InterviewReminderListAPI,
     CandidateReportAPI,
-    
+    RecruiterFunnelAnalyticsAPI,
+    RecruiterJobPerformanceAPI,
+    RecruiterTimeAnalyticsAPI,
+    RecruiterRoleAnalyticsAPI,
 
     
 )
@@ -276,4 +279,25 @@ path(
     CandidateReportAPI.as_view(),
     name="candidate-report",
 ),
+path(
+    "analytics/funnel/",
+    RecruiterFunnelAnalyticsAPI.as_view(),
+    name="recruiter-funnel-analytics",
+),
+path(
+    "analytics/jobs/",
+    RecruiterJobPerformanceAPI.as_view(),
+    name="recruiter-job-performance",
+),
+path(
+    "analytics/monthly/",
+    RecruiterTimeAnalyticsAPI.as_view(),
+    name="recruiter-monthly-analytics",
+),
+path(
+    "analytics/roles/",
+    RecruiterRoleAnalyticsAPI.as_view(),
+    name="recruiter-role-analytics",
+),
+
 ]

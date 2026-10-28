@@ -226,18 +226,25 @@ class AdminAuditLog(models.Model):
         User,
         on_delete=models.SET_NULL,
         null=True,
-        related_name='audit_logs'
+        blank=True,
+        related_name="audit_logs",
+    )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="performed_audit_actions",
     )
     action = models.CharField(max_length=100)
     details = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.action} - {self.created_at}"      
-
+        return f"{self.action} - {self.created_at}"
 class AICallLog(models.Model):
     STATUS_CHOICES = [
         ("QUEUED", "Queued"),

@@ -1,8 +1,12 @@
+import logging
+
 from celery import shared_task
 from django.core.mail import send_mail
-from core.models import EmailDeliveryLog
 from django.utils import timezone
-from core.models import AICallLog
+
+from core.models import AICallLog, EmailDeliveryLog
+
+logger = logging.getLogger("core")
 
 @shared_task
 def send_email_notification(log_id):
@@ -135,16 +139,29 @@ def trigger_ai_call_task(self, candidate_id, job_id, application_id):
     from django.utils import timezone
     from core.models import AICallLog
 
+    task_id = self.request.id
+
     try:
         call_log = AICallLog.objects.get(
             application_id=application_id,
-            celery_task_id=self.request.id,
+            celery_task_id=task_id,
         )
     except AICallLog.DoesNotExist:
+        logger.error(
+            "AI call log not found: task_id=%s application_id=%s",
+            task_id,
+            application_id,
+        )
         return {
             "status": "FAILED",
             "message": "AI call log not found.",
         }
+
+    logger.info(
+        "AI call task started: task_id=%s application_id=%s",
+        task_id,
+        application_id,
+    )
 
     try:
         call_log.status = "IN_PROGRESS"
@@ -173,12 +190,21 @@ def trigger_ai_call_task(self, candidate_id, job_id, application_id):
                 "updated_at",
             ]
         )
+
+        logger.info(
+            "AI call task completed: task_id=%s application_id=%s",
+            task_id,
+            application_id,
+        )
+
         return result
 
     except Exception as exc:
+        retry_number = self.request.retries + 1
+
         call_log.status = "FAILED"
         call_log.error_message = str(exc)
-        call_log.retry_count = self.request.retries + 1
+        call_log.retry_count = retry_number
         call_log.save(
             update_fields=[
                 "status",
@@ -188,8 +214,24 @@ def trigger_ai_call_task(self, candidate_id, job_id, application_id):
             ]
         )
 
-        raise self.retry(exc=exc, countdown=60)
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                "AI call retry scheduled: task_id=%s "
+                "application_id=%s retry=%s error_type=%s",
+                task_id,
+                application_id,
+                retry_number,
+                type(exc).__name__,
+            )
+        else:
+            logger.exception(
+                "AI call failed after maximum retries: "
+                "task_id=%s application_id=%s",
+                task_id,
+                application_id,
+            )
 
+        raise self.retry(exc=exc, countdown=60)
 @shared_task
 def expire_deadline_jobs_task():
     from .models import Job

@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 from datetime import timedelta
+import os
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -135,6 +136,7 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'core.exceptions.custom_exception_handler',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 5,
+    
 
 }
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
@@ -149,3 +151,90 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "Asia/Kolkata"
+# Redis Cache Configuration
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/2",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+        "TIMEOUT": 300,
+    }
+}
+# Centralized Logging Configuration
+
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+
+    "formatters": {
+        "verbose": {
+            "format": (
+                "{levelname} {asctime} "
+                "{name} {message}"
+            ),
+            "style": "{",
+        },
+    },
+
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+
+        "application_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "application.log",
+            "formatter": "verbose",
+        },
+
+        "error_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "error.log",
+            "level": "ERROR",
+            "formatter": "verbose",
+        },
+
+        "security_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "security.log",
+            "formatter": "verbose",
+            "level": "WARNING",
+        },
+    },
+
+    "root": {
+        "handlers": [
+            "console",
+            "application_file",
+            "error_file",
+        ],
+        "level": "INFO",
+    },
+
+    "loggers": {
+        "django": {
+            "handlers": [
+                "console",
+                "application_file",
+                "error_file",
+            ],
+            "level": "INFO",
+            "propagate": False,
+        },
+
+        "django.security": {
+            "handlers": [
+                "console",
+                "security_file",
+            ],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+}

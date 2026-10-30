@@ -7,7 +7,20 @@ from unittest.mock import patch
 from django.utils import timezone
 from datetime import date, timedelta
 from rest_framework import status
-from .models import User, Candidate, Employer, Job, Application, AvailabilitySlot,InterviewSchedule,InterviewReminder
+from .models import (
+    User,
+    Candidate,
+    Employer,
+    Job,
+    Application,
+    AvailabilitySlot,
+    InterviewSchedule,
+    InterviewReminder,
+    SubscriptionPlan,
+    UserSubscription,
+    PaymentTransaction,
+    BillingHistory,
+)
 from core.ai_question_engine import (
     get_questions_for_job,
     get_follow_up_question,
@@ -354,3 +367,265 @@ class InterviewReminderTaskTests(TestCase):
         self.assertEqual(result["sent"], 1)
         self.assertEqual(result["failed"], 1)
         mock_process.assert_called_once_with()
+class SubscriptionAccessTest(TestCase):
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.user = User.objects.create_user(
+            username="testemployer",
+            email="employer@test.com",
+            password="testpass123",
+            role="EMPLOYER"
+        )
+
+        self.employer = Employer.objects.get(user=self.user)
+
+        self.free_plan = SubscriptionPlan.objects.create(
+            name="FREE",
+            description="Free plan",
+            price=0,
+            currency="INR",
+            billing_period="MONTHLY",
+            job_post_limit=2,
+            features={
+                "job_posting": True,
+                "recruiter_analytics": False,
+                "ai_analytics": False,
+            },
+        )
+
+        self.pro_plan = SubscriptionPlan.objects.create(
+            name="PRO",
+            description="Pro plan",
+            price=999,
+            currency="INR",
+            billing_period="MONTHLY",
+            job_post_limit=None,
+            features={
+                "job_posting": True,
+                "recruiter_analytics": True,
+                "ai_analytics": False,
+            },
+        )
+        self.enterprise_plan = SubscriptionPlan.objects.create(
+            name="ENTERPRISE",
+            description="Enterprise plan",
+            price=4999,
+            currency="INR",
+            billing_period="MONTHLY",
+            job_post_limit=None,
+            features={
+                "job_posting": True,
+                "recruiter_analytics": True,
+                "ai_analytics": True,
+            },
+        )
+
+    def test_free_plan_job_limit(self):
+        UserSubscription.objects.create(
+            user=self.user,
+            plan=self.free_plan,
+            status="ACTIVE"
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        job_data = {
+            "description": "Python Django Developer",
+            "skills": "Python, Django",
+            "education_required": "Degree",
+            "location": "Kochi",
+            "job_type": "Full Time",
+            "experience_required": 1,
+            "deadline": (date.today() + timedelta(days=30)).isoformat()
+        }
+
+        # First job
+        response1 = self.client.post(
+            "/api/jobs/create/",
+            {**job_data, "title": "Python Developer 1"},
+            format="json"
+        )
+
+        self.assertEqual(
+            response1.status_code,
+            status.HTTP_201_CREATED
+        )
+
+        # Second job
+        response2 = self.client.post(
+            "/api/jobs/create/",
+            {**job_data, "title": "Python Developer 2"},
+            format="json"
+        )
+
+        self.assertEqual(
+            response2.status_code,
+            status.HTTP_201_CREATED
+        )
+
+        # Third job should be blocked
+        response3 = self.client.post(
+            "/api/jobs/create/",
+            {**job_data, "title": "Python Developer 3"},
+            format="json"
+        )
+
+        self.assertEqual(
+            response3.status_code,
+            status.HTTP_403_FORBIDDEN
+        )
+    def test_pro_plan_unlimited_job_posting(self):
+        UserSubscription.objects.create(
+            user=self.user,
+            plan=self.pro_plan,
+            status="ACTIVE"
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        job_data = {
+            "description": "Python Django Developer",
+            "skills": "Python, Django",
+            "education_required": "Degree",
+            "location": "Kochi",
+            "job_type": "Full Time",
+            "experience_required": 1,
+            "deadline": (date.today() + timedelta(days=30)).isoformat()
+        }
+
+        for number in range(1, 6):
+            response = self.client.post(
+                "/api/jobs/create/",
+                {
+                    **job_data,
+                    "title": f"Python Developer {number}"
+                },
+                format="json"
+            )
+
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_201_CREATED
+            )    
+    def test_free_plan_cannot_access_recruiter_analytics(self):
+        UserSubscription.objects.create(
+            user=self.user,
+            plan=self.free_plan,
+            status="ACTIVE"
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        endpoints = [
+            "/api/analytics/funnel/",
+            "/api/analytics/jobs/",
+            "/api/analytics/monthly/",
+            "/api/analytics/roles/",
+        ]
+
+        for endpoint in endpoints:
+            response = self.client.get(endpoint)
+
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_403_FORBIDDEN,
+                msg=f"FREE user should not access {endpoint}"
+            )
+
+    def test_pro_can_access_recruiter_analytics(self):
+        UserSubscription.objects.create(
+            user=self.user,
+            plan=self.pro_plan,
+            status="ACTIVE"
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        endpoints = [
+            "/api/analytics/funnel/",
+            "/api/analytics/jobs/",
+            "/api/analytics/monthly/",
+            "/api/analytics/roles/",
+        ]
+
+        for endpoint in endpoints:
+            response = self.client.get(endpoint)
+
+            self.assertNotEqual(
+                response.status_code,
+                status.HTTP_403_FORBIDDEN,
+                msg=f"PRO user should have permission for {endpoint}"
+            )        
+    def test_free_and_pro_cannot_access_candidate_report(self):
+        for plan in [self.free_plan, self.pro_plan]:
+            UserSubscription.objects.create(
+                user=self.user,
+                plan=plan,
+                status="ACTIVE"
+            )
+
+            self.client.force_authenticate(user=self.user)
+
+            response = self.client.get(
+                "/api/applications/1/report/"
+            )
+
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_403_FORBIDDEN
+            )
+
+            UserSubscription.objects.filter(
+                user=self.user
+            ).delete()
+
+    def test_enterprise_can_access_candidate_report(self):
+    # Create an Enterprise subscription
+        UserSubscription.objects.create(
+            user=self.user,
+            plan=self.enterprise_plan,
+            status="ACTIVE"
+        )
+
+    # Create candidate user
+        candidate_user = User.objects.create_user(
+            username="report_candidate",
+            email="report_candidate@test.com",
+            password="TestPass123!",
+            role="CANDIDATE"
+        )
+
+        candidate = Candidate.objects.get(user=candidate_user)
+        candidate.phone = "9876543210"
+        candidate.address = "Kozhikode"
+        candidate.skills = "Python, Django, SQL"
+        candidate.save()
+
+    # Create job
+        job = Job.objects.create(
+            employer=self.employer,
+            title="Python Django Developer",
+            description="Python backend developer required",
+            skills="Python, Django",
+            location="Kozhikode",
+            job_type="FULL_TIME",
+            experience_required=0,
+            deadline="2026-12-31"
+        )
+
+    # Create application
+        application = Application.objects.create(
+            candidate=candidate,
+            job=job,
+            cover_letter="I am interested in this position."
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get(
+            f"/api/applications/{application.id}/report/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)

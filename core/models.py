@@ -650,3 +650,146 @@ class InterviewReminder(models.Model):
 
     def __str__(self):
         return f"{self.interview_id} - {self.stage} - {self.status}"
+
+class SubscriptionPlan(models.Model):
+    PLAN_CHOICES = [
+        ("FREE", "Free"),
+        ("PRO", "Pro"),
+        ("ENTERPRISE", "Enterprise"),
+    ]
+
+    name = models.CharField(
+        max_length=20,
+        choices=PLAN_CHOICES,
+        unique=True,
+    )
+    description = models.TextField(blank=True)
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
+    currency = models.CharField(max_length=3, default="INR")
+    billing_period = models.CharField(
+        max_length=20,
+        choices=[
+            ("MONTHLY", "Monthly"),
+            ("YEARLY", "Yearly"),
+        ],
+        default="MONTHLY",
+    )
+    job_post_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+    )
+    features = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class UserSubscription(models.Model):
+    STATUS_CHOICES = [
+        ("ACTIVE", "Active"),
+        ("EXPIRED", "Expired"),
+        ("CANCELLED", "Cancelled"),
+        ("PENDING", "Pending"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="subscriptions",
+    )
+    plan = models.ForeignKey(
+        SubscriptionPlan,
+        on_delete=models.PROTECT,
+        related_name="user_subscriptions",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    start_date = models.DateTimeField(null=True, blank=True)
+    end_date = models.DateTimeField(null=True, blank=True)
+    auto_renew = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user} - {self.plan.name} ({self.status})"
+
+
+class PaymentTransaction(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("SUCCESS", "Success"),
+        ("FAILED", "Failed"),
+        ("REFUNDED", "Refunded"),
+    ]
+
+    subscription = models.ForeignKey(
+        UserSubscription,
+        on_delete=models.PROTECT,
+        related_name="transactions",
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="INR")
+    transaction_reference = models.CharField(
+        max_length=255,
+        unique=True,
+    )
+    provider = models.CharField(max_length=50, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return (
+            f"{self.transaction_reference} - {self.status}"
+        )
+
+
+class BillingHistory(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("PAID", "Paid"),
+        ("FAILED", "Failed"),
+        ("REFUNDED", "Refunded"),
+    ]
+
+    subscription = models.ForeignKey(
+        UserSubscription,
+        on_delete=models.PROTECT,
+        related_name="billing_history",
+    )
+    transaction = models.ForeignKey(
+        PaymentTransaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="billing_records",
+    )
+    invoice_number = models.CharField(
+        max_length=100,
+        unique=True,
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="INR")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    billing_date = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.invoice_number} - {self.status}"

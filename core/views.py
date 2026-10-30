@@ -18,7 +18,14 @@ from core.interview_scheduler import (
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAuthenticated
 from .models import Application, Candidate, Employer, Job,ApplicationStatusHistory,SavedJob,User,AccountFlag,AdminAuditLog,ATSScore,EmailDeliveryLog,AIAnswer
-from .permissions import IsCandidate, IsEmployer,IsPlatformAdmin
+from .permissions import (
+    IsCandidate,
+    IsEmployer,
+    IsPlatformAdmin,
+    HasRecruiterAnalyticsAccess,
+    HasAIAnalyticsAccess,
+    get_active_subscription,
+)
 from rest_framework.parsers import MultiPartParser, FormParser
 from core.answer_scoring import evaluate_and_save_answer
 from django.db.models.functions import TruncMonth
@@ -201,21 +208,47 @@ class LatestJobListAPI(APIView):
         return paginator.get_paginated_response(
             serializer.data
         )
+
 class JobCreateAPI(APIView):
     permission_classes = [IsEmployer]
 
     def post(self, request):
+        employer = request.user.employer_profile
+
+        subscription = get_active_subscription(request.user)
+
+        if subscription is None:
+            job_limit = 2
+        else:
+            job_limit = subscription.plan.job_post_limit
+
+        if job_limit is not None:
+            current_job_count = Job.objects.filter(
+                employer=employer
+            ).count()
+
+            if current_job_count >= job_limit:
+                return Response(
+                    {
+                        "detail": (
+                            f"Your subscription allows only "
+                            f"{job_limit} job postings. "
+                            "Upgrade your plan to post more jobs."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
         serializer = JobSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        serializer.save(
-            employer=request.user.employer_profile
-        )
+        serializer.save(employer=employer)
 
         return Response(
             serializer.data,
             status=status.HTTP_201_CREATED
         )
+
 class JobUpdateAPI(APIView):
     permission_classes = [IsEmployer]
 
@@ -403,7 +436,7 @@ class EmployerDashboardAPI(APIView):
         })
 
 class RecruiterFunnelAnalyticsAPI(APIView):
-    permission_classes = [IsEmployer]
+    permission_classes = [HasRecruiterAnalyticsAccess]
 
     def get(self, request):
         employer = request.user.employer_profile
@@ -487,7 +520,7 @@ class RecruiterFunnelAnalyticsAPI(APIView):
 
 
 class RecruiterJobPerformanceAPI(APIView):
-    permission_classes = [IsEmployer]
+    permission_classes = [HasRecruiterAnalyticsAccess]
 
     def get(self, request):
         employer = request.user.employer_profile
@@ -584,7 +617,7 @@ class RecruiterJobPerformanceAPI(APIView):
 
 
 class RecruiterTimeAnalyticsAPI(APIView):
-    permission_classes = [IsEmployer]
+    permission_classes = [HasRecruiterAnalyticsAccess]
 
     def get(self, request):
         employer = request.user.employer_profile
@@ -617,7 +650,7 @@ class RecruiterTimeAnalyticsAPI(APIView):
         })
     
 class RecruiterRoleAnalyticsAPI(APIView):
-    permission_classes = [IsEmployer]
+    permission_classes = [HasRecruiterAnalyticsAccess]
 
     def get(self, request):
         employer = request.user.employer_profile
@@ -1935,7 +1968,7 @@ class InterviewReminderListAPI(APIView):
 
 
 class CandidateReportAPI(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasAIAnalyticsAccess]
 
     def get(self, request, application_id):
         # Only employers/recruiters can access reports.
